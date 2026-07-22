@@ -161,6 +161,10 @@ def get_custom_css():
         .stColumn {
             padding: 0 0.5rem !important;
         }
+        /* Fix for delete button */
+        .stButton button[data-testid="baseButton-secondary"] {
+            background: #d93025 !important;
+        }
         </style>
         """
     else:
@@ -275,6 +279,10 @@ def get_custom_css():
         .stColumn {
             padding: 0 0.5rem !important;
         }
+        /* Fix for delete button */
+        .stButton button[data-testid="baseButton-secondary"] {
+            background: #d93025 !important;
+        }
         </style>
         """
 
@@ -292,7 +300,8 @@ def init_session_state():
         'editing_product_id': None,
         'editing_receipt_id': None,
         'editing_customer_id': None,
-        'keep_cart_after_save': False
+        'keep_cart_after_save': False,
+        'pdf_download_ready': None  # Store PDF data for download
     }
     
     for key, value in defaults.items():
@@ -417,46 +426,42 @@ def delete_customer(customer_id):
 def get_customer_receipts(email):
     return [r for r in st.session_state.receipts if r.get('customer_email') == email]
 
-# ==================== PDF GENERATION - ABC MART STYLE ====================
+# ==================== PDF GENERATION - EXACT ABC MART LAYOUT ====================
 
 def generate_pdf(receipt_data):
-    """Generate PDF receipt in ABC MART style"""
+    """Generate PDF receipt with exact ABC MART layout"""
     try:
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4,
-                               rightMargin=2*cm, leftMargin=2*cm,
+                               rightMargin=1.5*cm, leftMargin=1.5*cm,
                                topMargin=2*cm, bottomMargin=2*cm)
         
         styles = getSampleStyleSheet()
         story = []
         
         currency = CONFIG['currency_symbol']
+        primary_color = '#1a73e8'
         
-        # ===== HEADER =====
-        # Company Name
+        # ===== STYLES =====
         title_style = ParagraphStyle(
             'Title',
             parent=styles['Heading1'],
             fontSize=24,
-            textColor=colors.HexColor('#1a73e8'),
+            textColor=colors.HexColor(primary_color),
             alignment=TA_CENTER,
             spaceAfter=2,
             fontName='Helvetica-Bold'
         )
-        story.append(Paragraph(CONFIG['company_name'], title_style))
         
-        # Tagline
         tagline_style = ParagraphStyle(
             'Tagline',
             parent=styles['Normal'],
-            fontSize=10,
+            fontSize=11,
             textColor=colors.HexColor('#666666'),
             alignment=TA_CENTER,
-            spaceAfter=10
+            spaceAfter=8
         )
-        story.append(Paragraph(CONFIG['company_tagline'], tagline_style))
         
-        # Address & Contact
         contact_style = ParagraphStyle(
             'Contact',
             parent=styles['Normal'],
@@ -465,53 +470,117 @@ def generate_pdf(receipt_data):
             alignment=TA_CENTER,
             spaceAfter=2
         )
-        story.append(Paragraph(CONFIG['company_address'], contact_style))
-        story.append(Paragraph(f"Phone: {CONFIG['company_phone']}", contact_style))
-        story.append(Paragraph(f"Email: {CONFIG['company_email']}", contact_style))
-        story.append(Spacer(1, 0.2*inch))
         
-        # ===== DIVIDER =====
         divider_style = ParagraphStyle(
             'Divider',
             parent=styles['Normal'],
             fontSize=10,
-            textColor=colors.HexColor('#1a73e8'),
-            alignment=TA_CENTER
+            textColor=colors.HexColor(primary_color),
+            alignment=TA_CENTER,
+            spaceAfter=6,
+            spaceBefore=6
         )
-        story.append(Paragraph("—" * 40, divider_style))
+        
+        info_label_style = ParagraphStyle(
+            'InfoLabel',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#333333'),
+            fontName='Helvetica-Bold'
+        )
+        
+        info_value_style = ParagraphStyle(
+            'InfoValue',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#333333')
+        )
+        
+        payment_style = ParagraphStyle(
+            'Payment',
+            parent=styles['Normal'],
+            fontSize=11,
+            textColor=colors.HexColor('#333333'),
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        
+        footer_style = ParagraphStyle(
+            'Footer',
+            parent=styles['Normal'],
+            fontSize=12,
+            textColor=colors.HexColor(primary_color),
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold',
+            spaceAfter=4
+        )
+        
+        footer_sub_style = ParagraphStyle(
+            'FooterSub',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#666666'),
+            alignment=TA_CENTER,
+            spaceAfter=8
+        )
+        
+        receipt_no_style = ParagraphStyle(
+            'ReceiptNo',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#999999'),
+            alignment=TA_CENTER,
+            spaceAfter=4
+        )
+        
+        # ===== BUILD RECEIPT =====
+        story.append(Paragraph(CONFIG['company_name'], title_style))
+        story.append(Paragraph(CONFIG['company_tagline'], tagline_style))
+        story.append(Paragraph(CONFIG['company_address'], contact_style))
+        story.append(Paragraph(f"Phone: {CONFIG['company_phone']}", contact_style))
+        story.append(Paragraph(f"Email: {CONFIG['company_email']}", contact_style))
         story.append(Spacer(1, 0.1*inch))
         
-        # ===== RECEIPT INFO =====
-        info_data = [
-            ['Receipt No', ':', receipt_data.get('receipt_number', 'N/A')],
-            ['Date', ':', receipt_data.get('date', 'N/A')],
-            ['Cashier', ':', 'Admin'],
-            ['Time', ':', receipt_data.get('time', datetime.datetime.now().strftime(CONFIG['time_format']))],
-            ['Customer', ':', receipt_data.get('customer_name', 'Walk-in Customer')],
-        ]
+        story.append(Paragraph("—" * 45, divider_style))
+        story.append(Spacer(1, 0.05*inch))
         
-        info_table = Table(info_data, colWidths=[2*inch, 0.3*inch, 3.5*inch])
+        info_data = []
+        info_data.append([Paragraph("Receipt No", info_label_style), Paragraph(":", info_label_style), 
+                         Paragraph(receipt_data.get('receipt_number', 'N/A'), info_value_style)])
+        info_data.append([Paragraph("Date", info_label_style), Paragraph(":", info_label_style), 
+                         Paragraph(receipt_data.get('date', 'N/A'), info_value_style)])
+        info_data.append([Paragraph("Cashier", info_label_style), Paragraph(":", info_label_style), 
+                         Paragraph("Admin", info_value_style)])
+        info_data.append([Paragraph("Time", info_label_style), Paragraph(":", info_label_style), 
+                         Paragraph(receipt_data.get('time', datetime.datetime.now().strftime(CONFIG['time_format'])), info_value_style)])
+        info_data.append([Paragraph("Customer", info_label_style), Paragraph(":", info_label_style), 
+                         Paragraph(receipt_data.get('customer_name', 'Walk-in Customer'), info_value_style)])
+        
+        info_table = Table(info_data, colWidths=[1.8*inch, 0.3*inch, 3.5*inch])
         info_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
-            ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#333333')),
-            ('TEXTCOLOR', (2, 0), (2, -1), colors.HexColor('#333333')),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'CENTER'),
             ('ALIGN', (2, 0), (2, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
         ]))
         story.append(info_table)
-        story.append(Spacer(1, 0.2*inch))
+        story.append(Spacer(1, 0.05*inch))
         
-        # ===== DIVIDER =====
-        story.append(Paragraph("—" * 40, divider_style))
-        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph("—" * 45, divider_style))
+        story.append(Spacer(1, 0.05*inch))
         
-        # ===== ITEMS TABLE =====
-        item_data = [['Item', 'Qty', 'Unit Price', 'Total Price']]
+        item_data = []
+        item_data.append([
+            Paragraph('<b>Item</b>', styles['Normal']),
+            Paragraph('<b>Qty</b>', styles['Normal']),
+            Paragraph('<b>Unit Price</b>', styles['Normal']),
+            Paragraph('<b>Total Price</b>', styles['Normal'])
+        ])
+        
         for item in receipt_data.get('items', []):
             item_data.append([
                 Paragraph(item.get('name', ''), styles['Normal']),
@@ -522,126 +591,108 @@ def generate_pdf(receipt_data):
         
         item_table = Table(item_data, colWidths=[2.5*inch, 0.8*inch, 1.5*inch, 1.8*inch])
         item_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a73e8')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(primary_color)),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
             ('ALIGN', (0, 0), (0, 0), 'LEFT'),
             ('ALIGN', (1, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('ALIGN', (0, 1), (0, -1), 'LEFT'),
             ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
             ('BACKGROUND', (0, 1), (-1, -1), colors.whitesmoke),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
-            ('FONTSIZE', (0, 1), (-1, -1), 9),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
         ]))
         story.append(item_table)
-        story.append(Spacer(1, 0.2*inch))
+        story.append(Spacer(1, 0.05*inch))
         
-        # ===== DIVIDER =====
-        story.append(Paragraph("—" * 40, divider_style))
-        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph("—" * 45, divider_style))
+        story.append(Spacer(1, 0.05*inch))
         
-        # ===== TOTALS =====
         subtotal = receipt_data.get('subtotal', 0)
         discount = receipt_data.get('discount', 0)
         discount_amount = receipt_data.get('discount_amount', 0)
         tax = receipt_data.get('tax', 0)
         tax_amount = receipt_data.get('tax_amount', 0)
         grand_total = receipt_data.get('grand_total', 0)
-        
-        totals_data = [
-            ['Subtotal', f"{currency} {subtotal:.2f}"],
-        ]
-        
-        if discount > 0:
-            totals_data.append([f'Discount ({discount}%)', f"-{currency} {discount_amount:.2f}"])
-        
-        if tax > 0:
-            totals_data.append([f'Tax ({tax}%)', f"{currency} {tax_amount:.2f}"])
-        
-        totals_data.append(['Grand Total', f"{currency} {grand_total:.2f}"])
-        
-        # Add amount paid and change if available
         amount_paid = receipt_data.get('amount_paid', grand_total)
         change_returned = amount_paid - grand_total if amount_paid > grand_total else 0
         
-        totals_data.append(['Amount Paid', f"{currency} {amount_paid:.2f}"])
-        if change_returned > 0:
-            totals_data.append(['Change Returned', f"{currency} {change_returned:.2f}"])
+        totals_data = []
+        totals_data.append([Paragraph('Subtotal', info_label_style), 
+                           Paragraph(f"{currency} {subtotal:.2f}", info_value_style)])
         
-        totals_table = Table(totals_data, colWidths=[4*inch, 2.5*inch])
+        if discount > 0:
+            totals_data.append([Paragraph(f'Discount ({discount}%)', info_label_style), 
+                               Paragraph(f"-{currency} {discount_amount:.2f}", info_value_style)])
+        
+        if tax > 0:
+            totals_data.append([Paragraph(f'Tax ({tax}%)', info_label_style), 
+                               Paragraph(f"{currency} {tax_amount:.2f}", info_value_style)])
+        
+        totals_data.append([Paragraph('<b>Grand Total</b>', styles['Normal']), 
+                           Paragraph(f"<b>{currency} {grand_total:.2f}</b>", styles['Normal'])])
+        totals_data.append([Paragraph('Amount Paid', info_label_style), 
+                           Paragraph(f"{currency} {amount_paid:.2f}", info_value_style)])
+        
+        if change_returned > 0:
+            totals_data.append([Paragraph('Change Returned', info_label_style), 
+                               Paragraph(f"{currency} {change_returned:.2f}", info_value_style)])
+        
+        totals_table = Table(totals_data, colWidths=[4.2*inch, 2.5*inch])
         totals_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
             ('TEXTCOLOR', (0, -3), (0, -3), colors.HexColor('#333333')),
             ('TEXTCOLOR', (1, -3), (1, -3), colors.HexColor('#333333')),
-            ('TEXTCOLOR', (0, -2), (0, -2), colors.HexColor('#1a73e8')),
-            ('TEXTCOLOR', (1, -2), (1, -2), colors.HexColor('#1a73e8')),
-            ('TEXTCOLOR', (0, -1), (0, -1), colors.HexColor('#1a73e8')),
-            ('TEXTCOLOR', (1, -1), (1, -1), colors.HexColor('#1a73e8')),
+            ('TEXTCOLOR', (0, -2), (0, -2), colors.HexColor(primary_color)),
+            ('TEXTCOLOR', (1, -2), (1, -2), colors.HexColor(primary_color)),
             ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, -2), (-1, -1), 13),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, -2), (-1, -1), 6),
+            ('FONTSIZE', (0, -2), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
         ]))
         story.append(totals_table)
-        story.append(Spacer(1, 0.2*inch))
+        story.append(Spacer(1, 0.05*inch))
         
-        # ===== DIVIDER =====
-        story.append(Paragraph("—" * 40, divider_style))
-        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph("—" * 45, divider_style))
+        story.append(Spacer(1, 0.05*inch))
         
-        # ===== PAYMENT METHOD =====
-        payment_style = ParagraphStyle(
-            'Payment',
-            parent=styles['Normal'],
-            fontSize=11,
-            textColor=colors.HexColor('#333333'),
-            alignment=TA_CENTER
-        )
         story.append(Paragraph(f"Payment Method : {receipt_data.get('payment_method', 'N/A')}", payment_style))
-        story.append(Spacer(1, 0.2*inch))
+        story.append(Spacer(1, 0.05*inch))
         
-        # ===== DIVIDER =====
-        story.append(Paragraph("—" * 40, divider_style))
-        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph("—" * 45, divider_style))
+        story.append(Spacer(1, 0.05*inch))
         
-        # ===== FOOTER =====
-        footer_style = ParagraphStyle(
-            'Footer',
-            parent=styles['Normal'],
-            fontSize=12,
-            textColor=colors.HexColor('#1a73e8'),
-            alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
-        )
         story.append(Paragraph("Thank you for shopping with us!", footer_style))
+        story.append(Paragraph("Please visit again.", footer_sub_style))
+        story.append(Spacer(1, 0.05*inch))
         
-        footer_style2 = ParagraphStyle(
-            'Footer2',
-            parent=styles['Normal'],
-            fontSize=10,
-            textColor=colors.HexColor('#666666'),
-            alignment=TA_CENTER
-        )
-        story.append(Paragraph("Please visit again.", footer_style2))
-        story.append(Spacer(1, 0.2*inch))
+        qr_data = generate_qr(receipt_data.get('receipt_number', 'N/A'))
+        if qr_data:
+            try:
+                qr_img = base64.b64decode(qr_data)
+                qr_io = io.BytesIO(qr_img)
+                qr_img_obj = RLImage(qr_io, width=1.2*inch, height=1.2*inch)
+                qr_table = Table([[qr_img_obj]], colWidths=[6*inch])
+                qr_table.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ]))
+                story.append(qr_table)
+            except:
+                pass
         
-        # ===== RECEIPT NUMBER AT BOTTOM =====
-        receipt_no_style = ParagraphStyle(
-            'ReceiptNo',
-            parent=styles['Normal'],
-            fontSize=10,
-            textColor=colors.HexColor('#999999'),
-            alignment=TA_CENTER
-        )
+        story.append(Spacer(1, 0.05*inch))
         story.append(Paragraph(receipt_data.get('receipt_number', 'N/A'), receipt_no_style))
         
-        # ===== BUILD PDF =====
         doc.build(story)
         buffer.seek(0)
         return buffer
@@ -649,7 +700,7 @@ def generate_pdf(receipt_data):
         st.error(f"PDF Generation Error: {str(e)}")
         return None
 
-# ==================== RECEIPT PREVIEW - ABC MART STYLE ====================
+# ==================== RECEIPT PREVIEW ====================
 
 def display_receipt_preview(receipt_data):
     """Display receipt preview in ABC MART style"""
@@ -761,7 +812,6 @@ def display_receipt_preview(receipt_data):
         </div>
     """
     
-    # QR Code
     qr_img = generate_qr(receipt_data.get('receipt_number', 'N/A'))
     if qr_img:
         html_content += f"""
@@ -943,7 +993,6 @@ def create_new_receipt():
         st.session_state.discount = discount
         st.session_state.tax = tax
         
-        # If amount paid is 0, set it to grand total
         if amount_paid == 0:
             amount_paid = grand_total
         
@@ -1018,6 +1067,7 @@ def create_new_receipt():
                 pdf_buffer = generate_pdf(receipt_data)
                 if pdf_buffer:
                     b64 = base64.b64encode(pdf_buffer.getvalue()).decode()
+                    # Direct download link - only one button
                     href = f'<a href="data:application/pdf;base64,{b64}" download="receipt_{receipt_data["receipt_number"]}.pdf" style="text-decoration:none;display:block;text-align:center;background:linear-gradient(135deg, #1a73e8, #0d47a1);color:white;padding:0.6rem;border-radius:12px;font-weight:600;">📥 Download PDF</a>'
                     st.markdown(href, unsafe_allow_html=True)
                 else:
@@ -1244,7 +1294,7 @@ def manage_customers():
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ==================== RECEIPT HISTORY ====================
+# ==================== RECEIPT HISTORY - FIXED DELETE ====================
 
 def view_receipt_history():
     st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
@@ -1312,11 +1362,14 @@ def view_receipt_history():
                         st.error("PDF generation failed")
                 
                 with col_actions3:
-                    if st.button("🗑️ Delete", use_container_width=True, key="delete_receipt"):
-                        if st.checkbox(f"Delete receipt #{selected_id}?"):
-                            st.session_state.receipts = [r for r in st.session_state.receipts if r['id'] != selected_id]
-                            save_data()
-                            st.rerun()
+                    # Fixed Delete Button - Using a proper delete flow
+                    delete_key = f"delete_receipt_{selected_id}"
+                    if st.button("🗑️ Delete", use_container_width=True, key=delete_key):
+                        # Delete the receipt directly without checkbox confusion
+                        st.session_state.receipts = [r for r in st.session_state.receipts if r['id'] != selected_id]
+                        save_data()
+                        st.success(f"✅ Receipt #{selected_id} deleted successfully!")
+                        st.rerun()
                 
                 if st.session_state.editing_receipt_id == selected_id:
                     st.markdown("---")
