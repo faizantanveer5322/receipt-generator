@@ -12,8 +12,7 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 import io
 import base64
 from PIL import Image
-import barcode
-from barcode.writer import ImageWriter
+import qrcode  
 import tempfile
 
 # ==================== CONFIGURATION ====================
@@ -349,15 +348,28 @@ def save_data():
             json.dump(receipt, f, indent=2)
 
 # ==================== BARCODE GENERATION ====================
-
 def generate_barcode(receipt_number):
+    """Generate QR code instead of barcode (more reliable)"""
     try:
-        code128 = barcode.get_barcode_class('code128')
+        # Create QR code
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(f"Receipt: {receipt_number}")
+        qr.make(fit=True)
+        
+        # Create image
+        img = qr.make_image(fill_color="black", back_color="white")
         buffer = io.BytesIO()
-        code128(str(receipt_number), writer=ImageWriter()).write(buffer)
+        img.save(buffer, format='PNG')
         buffer.seek(0)
-        barcode_base64 = base64.b64encode(buffer.getvalue()).decode()
-        return barcode_base64
+        
+        # Convert to base64
+        qr_base64 = base64.b64encode(buffer.getvalue()).decode()
+        return qr_base64
     except Exception as e:
         return None
 
