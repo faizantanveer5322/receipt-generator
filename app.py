@@ -4,7 +4,7 @@ import datetime
 import json
 import os
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.pagesizes import A4, inch
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch, cm
@@ -18,19 +18,21 @@ import tempfile
 # ==================== CONFIGURATION ====================
 CONFIG = {
     'app_name': '🧾 Professional Receipt Generator',
-    'company_name': 'My Store',
-    'company_address': '123 Main Street, City',
+    'company_name': 'ABC MART',
+    'company_tagline': 'Your Trust, Our Priority',
+    'company_address': '123 Main Street, Lahore, Pakistan',
     'company_phone': '+92 300 1234567',
-    'company_email': 'info@mystore.com',
+    'company_email': 'abcmart.pk@gmail.com',
     'currency_symbol': 'PKR',
-    'receipt_prefix': 'INV',
-    'date_format': '%Y-%m-%d %H:%M:%S',
+    'receipt_prefix': 'RCP',
+    'date_format': '%d-%m-%Y',
+    'time_format': '%I:%M %p',
     'primary_color': '#1a73e8',
     'secondary_color': '#0d47a1',
     'success_color': '#0f9d58',
     'danger_color': '#d93025',
-    'tax_default': 0.0,
-    'discount_default': 0.0,
+    'tax_default': 10.0,
+    'discount_default': 5.0,
     'shipping_default': 0.0,
     'payment_methods': ['Cash', 'Card', 'Easypaisa', 'JazzCash', 'Bank', 'Crypto'],
     'payment_statuses': ['Paid', 'Unpaid', 'Partial'],
@@ -290,18 +292,16 @@ def init_session_state():
         'editing_product_id': None,
         'editing_receipt_id': None,
         'editing_customer_id': None,
-        'keep_cart_after_save': False  # New flag to control cart behavior
+        'keep_cart_after_save': False
     }
     
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
     
-    # Create receipts folder if it doesn't exist
     if not os.path.exists(CONFIG['receipt_folder']):
         os.makedirs(CONFIG['receipt_folder'])
     
-    # Load data from file
     data_file = os.path.join(CONFIG['receipt_folder'], 'receipts_data.json')
     if os.path.exists(data_file):
         try:
@@ -311,11 +311,10 @@ def init_session_state():
                 st.session_state.receipt_counter = data.get('counter', 1)
                 st.session_state.products_db = data.get('products', [])
                 st.session_state.customers_db = data.get('customers', [])
-        except Exception as e:
-            st.error(f"Error loading data: {str(e)}")
+        except:
+            pass
 
 def save_data():
-    """Save all data to JSON file"""
     try:
         data = {
             'receipts': st.session_state.receipts,
@@ -329,21 +328,17 @@ def save_data():
         with open(data_file, 'w') as f:
             json.dump(data, f, indent=2)
         
-        # Save each receipt individually for backup
         for receipt in st.session_state.receipts:
             receipt_file = os.path.join(CONFIG['receipt_folder'], f"receipt_{receipt['receipt_number']}.json")
             with open(receipt_file, 'w') as f:
                 json.dump(receipt, f, indent=2)
-        
         return True
-    except Exception as e:
-        st.error(f"Error saving data: {str(e)}")
+    except:
         return False
 
 # ==================== QR CODE GENERATION ====================
 
 def generate_qr(receipt_number):
-    """Generate QR code for receipt"""
     try:
         qr = qrcode.QRCode(
             version=1,
@@ -361,15 +356,15 @@ def generate_qr(receipt_number):
         
         qr_base64 = base64.b64encode(buffer.getvalue()).decode()
         return qr_base64
-    except Exception as e:
+    except:
         return None
 
 # ==================== RECEIPT FUNCTIONS ====================
 
 def generate_receipt_number():
     prefix = CONFIG['receipt_prefix']
-    timestamp = datetime.datetime.now().strftime("%Y%m")
-    number = str(st.session_state.receipt_counter).zfill(4)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d")
+    number = str(st.session_state.receipt_counter).zfill(3)
     st.session_state.receipt_counter += 1
     save_data()
     return f"{prefix}-{timestamp}-{number}"
@@ -380,7 +375,7 @@ def calculate_totals(items, discount=0, tax=0, shipping=0):
     try:
         subtotal = sum(item.get('total', 0) for item in items)
         discount_amount = (subtotal * discount) / 100
-        tax_amount = (subtotal * tax) / 100
+        tax_amount = ((subtotal - discount_amount) * tax) / 100
         grand_total = subtotal - discount_amount + tax_amount + shipping
         return subtotal, discount_amount, tax_amount, shipping, grand_total
     except:
@@ -422,315 +417,231 @@ def delete_customer(customer_id):
 def get_customer_receipts(email):
     return [r for r in st.session_state.receipts if r.get('customer_email') == email]
 
-# ==================== RECEIPT PREVIEW FUNCTION ====================
-
-def display_receipt_preview(receipt_data):
-    """Display a receipt preview with proper formatting - FULL WIDTH"""
-    currency = CONFIG['currency_symbol']
-    
-    html_content = f"""
-    <div class="receipt-wrapper">
-    <div class="receipt-container">
-        <div class="header">
-            <h3>{receipt_data.get('shop_name', 'My Store')}</h3>
-            <small>{receipt_data.get('shop_address', '')}</small><br>
-            <small>📞 {receipt_data.get('shop_phone', '')}</small>
-        </div>
-        
-        <!-- Customer Info Grid -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
-            <div><strong>🧾 Receipt #</strong><br>{receipt_data.get('receipt_number', 'N/A')}</div>
-            <div><strong>📅 Date</strong><br>{receipt_data.get('date', 'N/A')}</div>
-            <div><strong>👤 Customer</strong><br>{receipt_data.get('customer_name', 'N/A')}</div>
-            <div><strong>📞 Contact</strong><br>{receipt_data.get('customer_contact', 'N/A')}</div>
-        </div>
-        
-        <!-- Items Section -->
-        <div style="border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; padding: 10px 0; margin: 10px 0;">
-            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; font-weight: 700; padding: 8px 0; border-bottom: 2px solid #1a73e8; color: #1a73e8;">
-                <span>Item</span>
-                <span style="text-align: center;">Qty</span>
-                <span style="text-align: right;">Total</span>
-            </div>
-    """
-    
-    # Items
-    for item in receipt_data.get('items', []):
-        html_content += f"""
-            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; padding: 8px 0; border-bottom: 1px dashed #ddd;">
-                <span>{item.get('name', '')}</span>
-                <span style="text-align: center;">x{item.get('quantity', 0)}</span>
-                <span style="text-align: right;">{currency} {item.get('total', 0):.2f}</span>
-            </div>
-        """
-    
-    subtotal = receipt_data.get('subtotal', 0)
-    discount = receipt_data.get('discount', 0)
-    discount_amount = receipt_data.get('discount_amount', 0)
-    shipping = receipt_data.get('shipping', 0)
-    tax = receipt_data.get('tax', 0)
-    tax_amount = receipt_data.get('tax_amount', 0)
-    grand_total = receipt_data.get('grand_total', 0)
-    
-    html_content += f"""
-        </div>
-        
-        <!-- Totals Section -->
-        <div style="margin-top: 10px;">
-            <div class="row">
-                <span>Subtotal</span>
-                <span>{currency} {subtotal:.2f}</span>
-            </div>
-    """
-    
-    if discount > 0:
-        html_content += f"""
-            <div class="row" style="color:#d93025;">
-                <span style="color:#d93025;">Discount ({discount}%)</span>
-                <span style="color:#d93025;">-{currency} {discount_amount:.2f}</span>
-            </div>
-        """
-    
-    if shipping > 0:
-        html_content += f"""
-            <div class="row">
-                <span>Shipping</span>
-                <span>+{currency} {shipping:.2f}</span>
-            </div>
-        """
-    
-    if tax > 0:
-        html_content += f"""
-            <div class="row" style="color:#0f9d58;">
-                <span style="color:#0f9d58;">Tax ({tax}%)</span>
-                <span style="color:#0f9d58;">+{currency} {tax_amount:.2f}</span>
-            </div>
-        """
-    
-    html_content += f"""
-        </div>
-        
-        <div class="total">
-            <div class="row">
-                <span>Grand Total</span>
-                <span>{currency} {grand_total:.2f}</span>
-            </div>
-        </div>
-        
-        <!-- Payment & Status -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px 20px; margin-top: 15px; padding-top: 10px; border-top: 1px solid #ccc;">
-            <div><strong>💳 Payment</strong><br>{receipt_data.get('payment_method', 'N/A')}</div>
-            <div><strong>✅ Status</strong><br>{receipt_data.get('payment_status', 'N/A')}</div>
-        </div>
-    """
-    
-    # QR Code
-    qr_img = generate_qr(receipt_data.get('receipt_number', 'N/A'))
-    if qr_img:
-        html_content += f"""
-        <div style="text-align: center; margin-top: 15px; padding-top: 15px; border-top: 1px solid #ccc;">
-            <img src="data:image/png;base64,{qr_img}" style="width:150px;height:150px;">
-            <br>
-            <small style="color: #666;">Scan QR to verify receipt</small>
-        </div>
-        """
-    
-    if receipt_data.get('notes'):
-        html_content += f"""
-        <div style="margin-top: 15px; padding: 12px 15px; background: #f0f4ff; border-radius: 8px; border-left: 4px solid #1a73e8;">
-            <strong style="color: #000000;">📝 Notes:</strong> 
-            <span style="color: #000000;">{receipt_data.get('notes', '')}</span>
-        </div>
-        """
-    
-    html_content += """
-    </div>
-    </div>
-    """
-    
-    st.html(html_content)
-
-# ==================== PDF GENERATION - FIXED ====================
+# ==================== PDF GENERATION - ABC MART STYLE ====================
 
 def generate_pdf(receipt_data):
-    """Generate PDF with proper error handling"""
+    """Generate PDF receipt in ABC MART style"""
     try:
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4,
-                               rightMargin=1*cm, leftMargin=1*cm,
-                               topMargin=1.5*cm, bottomMargin=1.5*cm)
+                               rightMargin=2*cm, leftMargin=2*cm,
+                               topMargin=2*cm, bottomMargin=2*cm)
         
         styles = getSampleStyleSheet()
         story = []
         
-        primary = CONFIG['primary_color']
         currency = CONFIG['currency_symbol']
         
+        # ===== HEADER =====
+        # Company Name
         title_style = ParagraphStyle(
-            'CustomTitle',
+            'Title',
             parent=styles['Heading1'],
-            fontSize=28,
-            textColor=colors.HexColor(primary),
+            fontSize=24,
+            textColor=colors.HexColor('#1a73e8'),
             alignment=TA_CENTER,
-            spaceAfter=5,
+            spaceAfter=2,
             fontName='Helvetica-Bold'
         )
+        story.append(Paragraph(CONFIG['company_name'], title_style))
         
-        subtitle_style = ParagraphStyle(
-            'Subtitle',
+        # Tagline
+        tagline_style = ParagraphStyle(
+            'Tagline',
             parent=styles['Normal'],
             fontSize=10,
-            textColor=colors.grey,
+            textColor=colors.HexColor('#666666'),
             alignment=TA_CENTER,
-            spaceAfter=20
+            spaceAfter=10
         )
+        story.append(Paragraph(CONFIG['company_tagline'], tagline_style))
         
-        story.append(Paragraph(receipt_data.get('shop_name', CONFIG['company_name']), title_style))
-        story.append(Paragraph("Official Tax Invoice / Receipt", subtitle_style))
-        story.append(Spacer(1, 0.2*inch))
-        
-        company_style = ParagraphStyle(
-            'CompanyInfo',
+        # Address & Contact
+        contact_style = ParagraphStyle(
+            'Contact',
             parent=styles['Normal'],
             fontSize=9,
-            textColor=colors.grey,
+            textColor=colors.HexColor('#666666'),
+            alignment=TA_CENTER,
+            spaceAfter=2
+        )
+        story.append(Paragraph(CONFIG['company_address'], contact_style))
+        story.append(Paragraph(f"Phone: {CONFIG['company_phone']}", contact_style))
+        story.append(Paragraph(f"Email: {CONFIG['company_email']}", contact_style))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # ===== DIVIDER =====
+        divider_style = ParagraphStyle(
+            'Divider',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#1a73e8'),
             alignment=TA_CENTER
         )
-        story.append(Paragraph(receipt_data.get('shop_address', CONFIG['company_address']), company_style))
-        story.append(Paragraph(f"📞 {receipt_data.get('shop_phone', CONFIG['company_phone'])}", company_style))
-        story.append(Paragraph(f"✉️ {receipt_data.get('shop_email', CONFIG['company_email'])}", company_style))
-        story.append(Spacer(1, 0.3*inch))
+        story.append(Paragraph("—" * 40, divider_style))
+        story.append(Spacer(1, 0.1*inch))
         
+        # ===== RECEIPT INFO =====
         info_data = [
-            ['Receipt #:', receipt_data.get('receipt_number', 'N/A')],
-            ['Date:', receipt_data.get('date', 'N/A')],
-            ['Customer:', receipt_data.get('customer_name', 'N/A')],
-            ['Contact:', receipt_data.get('customer_contact', 'N/A')],
-            ['Email:', receipt_data.get('customer_email', 'N/A')],
+            ['Receipt No', ':', receipt_data.get('receipt_number', 'N/A')],
+            ['Date', ':', receipt_data.get('date', 'N/A')],
+            ['Cashier', ':', 'Admin'],
+            ['Time', ':', receipt_data.get('time', datetime.datetime.now().strftime(CONFIG['time_format']))],
+            ['Customer', ':', receipt_data.get('customer_name', 'Walk-in Customer')],
         ]
         
-        info_table = Table(info_data, colWidths=[1.5*inch, 3.5*inch])
+        info_table = Table(info_data, colWidths=[2*inch, 0.3*inch, 3.5*inch])
         info_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
-            ('TEXTCOLOR', (1, 0), (1, -1), colors.black),
-            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#333333')),
+            ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#333333')),
+            ('TEXTCOLOR', (2, 0), (2, -1), colors.HexColor('#333333')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+            ('ALIGN', (2, 0), (2, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ]))
         story.append(info_table)
-        story.append(Spacer(1, 0.3*inch))
+        story.append(Spacer(1, 0.2*inch))
         
-        item_data = [['#', 'Item', 'Qty', 'Price', 'Total']]
-        for idx, item in enumerate(receipt_data.get('items', []), 1):
+        # ===== DIVIDER =====
+        story.append(Paragraph("—" * 40, divider_style))
+        story.append(Spacer(1, 0.1*inch))
+        
+        # ===== ITEMS TABLE =====
+        item_data = [['Item', 'Qty', 'Unit Price', 'Total Price']]
+        for item in receipt_data.get('items', []):
             item_data.append([
-                str(idx),
                 Paragraph(item.get('name', ''), styles['Normal']),
                 str(item.get('quantity', 0)),
                 f"{currency} {item.get('price', 0):.2f}",
                 f"{currency} {item.get('total', 0):.2f}"
             ])
         
-        item_table = Table(item_data, colWidths=[0.5*inch, 2.5*inch, 0.8*inch, 1.2*inch, 1.5*inch])
+        item_table = Table(item_data, colWidths=[2.5*inch, 0.8*inch, 1.5*inch, 1.8*inch])
         item_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(primary)),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a73e8')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('ALIGN', (1, 1), (1, -1), 'LEFT'),
+            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, 0), 'CENTER'),
+            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
             ('BACKGROUND', (0, 1), (-1, -1), colors.whitesmoke),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
             ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
         ]))
         story.append(item_table)
-        story.append(Spacer(1, 0.3*inch))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # ===== DIVIDER =====
+        story.append(Paragraph("—" * 40, divider_style))
+        story.append(Spacer(1, 0.1*inch))
+        
+        # ===== TOTALS =====
+        subtotal = receipt_data.get('subtotal', 0)
+        discount = receipt_data.get('discount', 0)
+        discount_amount = receipt_data.get('discount_amount', 0)
+        tax = receipt_data.get('tax', 0)
+        tax_amount = receipt_data.get('tax_amount', 0)
+        grand_total = receipt_data.get('grand_total', 0)
         
         totals_data = [
-            ['Subtotal:', f"{currency} {receipt_data.get('subtotal', 0):.2f}"],
+            ['Subtotal', f"{currency} {subtotal:.2f}"],
         ]
         
-        if receipt_data.get('discount', 0) > 0:
-            totals_data.append([f"Discount ({receipt_data.get('discount', 0)}%):", 
-                               f"-{currency} {receipt_data.get('discount_amount', 0):.2f}"])
+        if discount > 0:
+            totals_data.append([f'Discount ({discount}%)', f"-{currency} {discount_amount:.2f}"])
         
-        if receipt_data.get('shipping', 0) > 0:
-            totals_data.append(['Shipping:', f"{currency} {receipt_data.get('shipping', 0):.2f}"])
+        if tax > 0:
+            totals_data.append([f'Tax ({tax}%)', f"{currency} {tax_amount:.2f}"])
         
-        if receipt_data.get('tax', 0) > 0:
-            totals_data.append([f"Tax ({receipt_data.get('tax', 0)}%):", 
-                               f"+{currency} {receipt_data.get('tax_amount', 0):.2f}"])
+        totals_data.append(['Grand Total', f"{currency} {grand_total:.2f}"])
         
-        totals_data.append(['Grand Total:', f"{currency} {receipt_data.get('grand_total', 0):.2f}"])
+        # Add amount paid and change if available
+        amount_paid = receipt_data.get('amount_paid', grand_total)
+        change_returned = amount_paid - grand_total if amount_paid > grand_total else 0
         
-        totals_table = Table(totals_data, colWidths=[4*inch, 2*inch])
+        totals_data.append(['Amount Paid', f"{currency} {amount_paid:.2f}"])
+        if change_returned > 0:
+            totals_data.append(['Change Returned', f"{currency} {change_returned:.2f}"])
+        
+        totals_table = Table(totals_data, colWidths=[4*inch, 2.5*inch])
         totals_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 0), (-1, -1), 11),
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('TEXTCOLOR', (1, -1), (1, -1), colors.HexColor(primary)),
-            ('FONTNAME', (1, -1), (1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (1, -1), (1, -1), 14),
+            ('TEXTCOLOR', (0, -3), (0, -3), colors.HexColor('#333333')),
+            ('TEXTCOLOR', (1, -3), (1, -3), colors.HexColor('#333333')),
+            ('TEXTCOLOR', (0, -2), (0, -2), colors.HexColor('#1a73e8')),
+            ('TEXTCOLOR', (1, -2), (1, -2), colors.HexColor('#1a73e8')),
+            ('TEXTCOLOR', (0, -1), (0, -1), colors.HexColor('#1a73e8')),
+            ('TEXTCOLOR', (1, -1), (1, -1), colors.HexColor('#1a73e8')),
+            ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, -2), (-1, -1), 13),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, -2), (-1, -1), 6),
         ]))
         story.append(totals_table)
-        story.append(Spacer(1, 0.3*inch))
+        story.append(Spacer(1, 0.2*inch))
         
-        payment_data = [
-            ['Payment Method:', receipt_data.get('payment_method', 'N/A')],
-            ['Payment Status:', receipt_data.get('payment_status', 'N/A')],
-        ]
+        # ===== DIVIDER =====
+        story.append(Paragraph("—" * 40, divider_style))
+        story.append(Spacer(1, 0.1*inch))
         
-        if receipt_data.get('notes'):
-            payment_data.append(['Notes:', receipt_data.get('notes', '')])
+        # ===== PAYMENT METHOD =====
+        payment_style = ParagraphStyle(
+            'Payment',
+            parent=styles['Normal'],
+            fontSize=11,
+            textColor=colors.HexColor('#333333'),
+            alignment=TA_CENTER
+        )
+        story.append(Paragraph(f"Payment Method : {receipt_data.get('payment_method', 'N/A')}", payment_style))
+        story.append(Spacer(1, 0.2*inch))
         
-        payment_table = Table(payment_data, colWidths=[1.5*inch, 3.5*inch])
-        payment_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
-            ('TEXTCOLOR', (1, 0), (1, -1), colors.black),
-            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        story.append(payment_table)
-        story.append(Spacer(1, 0.3*inch))
+        # ===== DIVIDER =====
+        story.append(Paragraph("—" * 40, divider_style))
+        story.append(Spacer(1, 0.1*inch))
         
-        qr_data = generate_qr(receipt_data.get('receipt_number', 'N/A'))
-        if qr_data:
-            try:
-                qr_img = base64.b64decode(qr_data)
-                qr_io = io.BytesIO(qr_img)
-                qr_img_obj = RLImage(qr_io, width=1.5*inch, height=1.5*inch)
-                story.append(qr_img_obj)
-                story.append(Spacer(1, 0.1*inch))
-                qr_text = Paragraph(f"Scan to verify: {receipt_data.get('receipt_number', 'N/A')}", 
-                                         ParagraphStyle('QRText', parent=styles['Normal'], 
-                                                       fontSize=8, alignment=TA_CENTER, textColor=colors.grey))
-                story.append(qr_text)
-            except:
-                pass
-        
-        story.append(Spacer(1, 0.3*inch))
-        
+        # ===== FOOTER =====
         footer_style = ParagraphStyle(
             'Footer',
             parent=styles['Normal'],
-            fontSize=8,
-            textColor=colors.grey,
+            fontSize=12,
+            textColor=colors.HexColor('#1a73e8'),
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        story.append(Paragraph("Thank you for shopping with us!", footer_style))
+        
+        footer_style2 = ParagraphStyle(
+            'Footer2',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#666666'),
             alignment=TA_CENTER
         )
-        story.append(Paragraph("Thank you for your business!", footer_style))
-        story.append(Paragraph(f"Generated: {datetime.datetime.now().strftime(CONFIG['date_format'])}", footer_style))
-        story.append(Paragraph("This is a computer-generated receipt", footer_style))
+        story.append(Paragraph("Please visit again.", footer_style2))
+        story.append(Spacer(1, 0.2*inch))
         
+        # ===== RECEIPT NUMBER AT BOTTOM =====
+        receipt_no_style = ParagraphStyle(
+            'ReceiptNo',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#999999'),
+            alignment=TA_CENTER
+        )
+        story.append(Paragraph(receipt_data.get('receipt_number', 'N/A'), receipt_no_style))
+        
+        # ===== BUILD PDF =====
         doc.build(story)
         buffer.seek(0)
         return buffer
@@ -738,17 +649,146 @@ def generate_pdf(receipt_data):
         st.error(f"PDF Generation Error: {str(e)}")
         return None
 
+# ==================== RECEIPT PREVIEW - ABC MART STYLE ====================
+
+def display_receipt_preview(receipt_data):
+    """Display receipt preview in ABC MART style"""
+    currency = CONFIG['currency_symbol']
+    
+    html_content = f"""
+    <div class="receipt-wrapper">
+    <div class="receipt-container">
+        <div class="header">
+            <h3>{CONFIG['company_name']}</h3>
+            <small>{CONFIG['company_tagline']}</small><br>
+            <small>{CONFIG['company_address']}</small><br>
+            <small>Phone: {CONFIG['company_phone']}</small><br>
+            <small>Email: {CONFIG['company_email']}</small>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 20px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #ccc;">
+            <div><strong>Receipt No</strong><br>{receipt_data.get('receipt_number', 'N/A')}</div>
+            <div><strong>Date</strong><br>{receipt_data.get('date', 'N/A')}</div>
+            <div><strong>Cashier</strong><br>Admin</div>
+            <div><strong>Time</strong><br>{receipt_data.get('time', datetime.datetime.now().strftime(CONFIG['time_format']))}</div>
+            <div><strong>Customer</strong><br>{receipt_data.get('customer_name', 'Walk-in Customer')}</div>
+        </div>
+        
+        <div style="border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; padding: 10px 0; margin: 10px 0;">
+            <div style="display: grid; grid-template-columns: 2.5fr 0.8fr 1.2fr 1.5fr; font-weight: 700; padding: 8px 0; border-bottom: 2px solid #1a73e8; color: #1a73e8;">
+                <span>Item</span>
+                <span style="text-align: center;">Qty</span>
+                <span style="text-align: right;">Unit Price</span>
+                <span style="text-align: right;">Total Price</span>
+            </div>
+    """
+    
+    for item in receipt_data.get('items', []):
+        html_content += f"""
+            <div style="display: grid; grid-template-columns: 2.5fr 0.8fr 1.2fr 1.5fr; padding: 6px 0; border-bottom: 1px dashed #ddd;">
+                <span>{item.get('name', '')}</span>
+                <span style="text-align: center;">{item.get('quantity', 0)}</span>
+                <span style="text-align: right;">{currency} {item.get('price', 0):.2f}</span>
+                <span style="text-align: right;">{currency} {item.get('total', 0):.2f}</span>
+            </div>
+        """
+    
+    subtotal = receipt_data.get('subtotal', 0)
+    discount = receipt_data.get('discount', 0)
+    discount_amount = receipt_data.get('discount_amount', 0)
+    tax = receipt_data.get('tax', 0)
+    tax_amount = receipt_data.get('tax_amount', 0)
+    grand_total = receipt_data.get('grand_total', 0)
+    amount_paid = receipt_data.get('amount_paid', grand_total)
+    change_returned = amount_paid - grand_total if amount_paid > grand_total else 0
+    
+    html_content += f"""
+        </div>
+        
+        <div style="margin-top: 10px;">
+            <div style="display: flex; justify-content: space-between; padding: 4px 0;">
+                <span>Subtotal</span>
+                <span>{currency} {subtotal:.2f}</span>
+            </div>
+    """
+    
+    if discount > 0:
+        html_content += f"""
+            <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #d93025;">
+                <span style="color:#d93025;">Discount ({discount}%)</span>
+                <span style="color:#d93025;">-{currency} {discount_amount:.2f}</span>
+            </div>
+        """
+    
+    if tax > 0:
+        html_content += f"""
+            <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #0f9d58;">
+                <span style="color:#0f9d58;">Tax ({tax}%)</span>
+                <span style="color:#0f9d58;">+{currency} {tax_amount:.2f}</span>
+            </div>
+        """
+    
+    html_content += f"""
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; font-weight: 700; font-size: 1.2rem; border-top: 2px solid #1a73e8; color: #1a73e8;">
+                <span>Grand Total</span>
+                <span>{currency} {grand_total:.2f}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 4px 0;">
+                <span>Amount Paid</span>
+                <span>{currency} {amount_paid:.2f}</span>
+            </div>
+    """
+    
+    if change_returned > 0:
+        html_content += f"""
+            <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #0f9d58;">
+                <span style="color:#0f9d58;">Change Returned</span>
+                <span style="color:#0f9d58;">{currency} {change_returned:.2f}</span>
+            </div>
+        """
+    
+    html_content += f"""
+        </div>
+        
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc; text-align: center;">
+            <strong>Payment Method</strong><br>
+            {receipt_data.get('payment_method', 'N/A')}
+        </div>
+        
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ccc; text-align: center; color: #1a73e8; font-weight: 700;">
+            Thank you for shopping with us!<br>
+            <span style="color: #666; font-weight: 400;">Please visit again.</span>
+        </div>
+    """
+    
+    # QR Code
+    qr_img = generate_qr(receipt_data.get('receipt_number', 'N/A'))
+    if qr_img:
+        html_content += f"""
+        <div style="text-align: center; margin-top: 10px;">
+            <img src="data:image/png;base64,{qr_img}" style="width:100px;height:100px;">
+        </div>
+        """
+    
+    html_content += f"""
+        <div style="text-align: center; margin-top: 5px; color: #999; font-size: 10px;">
+            {receipt_data.get('receipt_number', 'N/A')}
+        </div>
+    </div>
+    </div>
+    """
+    
+    st.html(html_content)
+
 # ==================== CREATE NEW RECEIPT ====================
 
 def create_new_receipt():
     st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
     st.markdown("### 📝 Create New Receipt")
     
-    # Option to keep cart after saving
     keep_cart = st.checkbox("Keep items in cart after saving", value=st.session_state.get('keep_cart_after_save', False))
     st.session_state.keep_cart_after_save = keep_cart
     
-    # Use full width - no columns
     st.markdown("#### 👤 Customer Information")
     col_c1, col_c2, col_c3 = st.columns(3)
     with col_c1:
@@ -760,7 +800,6 @@ def create_new_receipt():
     
     customer_address = st.text_area("Address", placeholder="Enter address", key="cust_address", height=50)
     
-    # Quick customer selection
     if st.session_state.customers_db:
         with st.expander("💡 Quick Customer Select"):
             quick_customer = st.selectbox("Select saved customer", ["Select..."] + [c['name'] for c in st.session_state.customers_db])
@@ -771,7 +810,6 @@ def create_new_receipt():
     
     st.divider()
     
-    # Products
     st.markdown("#### 🛒 Products")
     
     selected_product = None
@@ -812,7 +850,6 @@ def create_new_receipt():
             else:
                 st.warning("Please select a product first")
     
-    # Custom product
     with st.expander("➕ Add Custom Product"):
         col_add1, col_add2, col_add3, col_add4 = st.columns([2.5, 1, 1, 1.2])
         with col_add1:
@@ -837,7 +874,6 @@ def create_new_receipt():
                 else:
                     st.error("Please enter product name and price")
     
-    # Current items
     if st.session_state.product_items:
         st.markdown("#### 📦 Current Items")
         items_df = pd.DataFrame(st.session_state.product_items)
@@ -846,10 +882,10 @@ def create_new_receipt():
             use_container_width=True,
             hide_index=True,
             column_config={
-                "name": "Product",
+                "name": "Item",
                 "quantity": "Qty",
-                "price": st.column_config.NumberColumn("Price", format=f"{CONFIG['currency_symbol']} %.2f"),
-                "total": st.column_config.NumberColumn("Total", format=f"{CONFIG['currency_symbol']} %.2f")
+                "price": st.column_config.NumberColumn("Unit Price", format=f"{CONFIG['currency_symbol']} %.2f"),
+                "total": st.column_config.NumberColumn("Total Price", format=f"{CONFIG['currency_symbol']} %.2f")
             }
         )
         
@@ -863,7 +899,6 @@ def create_new_receipt():
     
     st.divider()
     
-    # Payment
     st.markdown("#### 💰 Payment & Receipt Preview")
     
     col_pay1, col_pay2, col_pay3, col_pay4 = st.columns(4)
@@ -886,30 +921,31 @@ def create_new_receipt():
             key="tax_input"
         )
     with col_pay3:
-        shipping = st.number_input(
-            "Shipping", 
+        amount_paid = st.number_input(
+            "Amount Paid", 
             min_value=0.0,
-            value=float(st.session_state.get('shipping', CONFIG['shipping_default'])), 
-            step=50.0,
-            key="shipping_input"
+            value=0.0,
+            step=100.0,
+            key="amount_paid_input"
         )
     with col_pay4:
         payment_method = st.selectbox("Payment Method", CONFIG['payment_methods'], key="payment_method")
-        payment_status = st.selectbox("Status", CONFIG['payment_statuses'], key="payment_status")
     
     notes = st.text_area("📝 Notes", placeholder="Additional notes...", height=60, key="notes_input")
     
     st.divider()
     
-    # Receipt Preview
     if st.session_state.product_items:
         subtotal, discount_amount, tax_amount, shipping_amount, grand_total = calculate_totals(
-            st.session_state.product_items, discount, tax, shipping
+            st.session_state.product_items, discount, tax, 0
         )
         
         st.session_state.discount = discount
         st.session_state.tax = tax
-        st.session_state.shipping = shipping
+        
+        # If amount paid is 0, set it to grand total
+        if amount_paid == 0:
+            amount_paid = grand_total
         
         receipt_data = {
             'shop_name': CONFIG['company_name'],
@@ -918,6 +954,7 @@ def create_new_receipt():
             'shop_email': CONFIG['company_email'],
             'receipt_number': generate_receipt_number(),
             'date': datetime.datetime.now().strftime(CONFIG['date_format']),
+            'time': datetime.datetime.now().strftime(CONFIG['time_format']),
             'customer_name': customer_name or "Walk-in Customer",
             'customer_contact': customer_contact or "N/A",
             'customer_email': customer_email or "N/A",
@@ -928,18 +965,15 @@ def create_new_receipt():
             'discount_amount': discount_amount,
             'tax': tax,
             'tax_amount': tax_amount,
-            'shipping': shipping,
-            'shipping_amount': shipping_amount,
             'grand_total': grand_total,
+            'amount_paid': amount_paid,
+            'change_returned': amount_paid - grand_total if amount_paid > grand_total else 0,
             'payment_method': payment_method,
-            'payment_status': payment_status,
             'notes': notes
         }
         
-        # Display full width receipt preview
         display_receipt_preview(receipt_data)
         
-        # Actions
         st.divider()
         col_actions1, col_actions2, col_actions3 = st.columns(3)
         
@@ -948,7 +982,6 @@ def create_new_receipt():
                 receipt_data['id'] = len(st.session_state.receipts) + 1
                 st.session_state.receipts.append(receipt_data)
                 
-                # Update or add customer
                 if customer_name and customer_email:
                     existing_customer = next((c for c in st.session_state.customers_db if c['email'] == customer_email), None)
                     if existing_customer:
@@ -969,12 +1002,10 @@ def create_new_receipt():
                             'created_at': datetime.datetime.now().strftime(CONFIG['date_format'])
                         })
                 
-                # Save data
                 if save_data():
                     st.success(f"✅ Receipt {receipt_data['receipt_number']} saved successfully!")
                     st.balloons()
                     
-                    # Clear cart only if not keeping items
                     if not st.session_state.keep_cart_after_save:
                         st.session_state.product_items = []
                     
@@ -1243,10 +1274,9 @@ def view_receipt_history():
             
             st.divider()
             
-            # Display receipts in table
             df = pd.DataFrame(filtered_receipts)
-            display_df = df[['id', 'receipt_number', 'date', 'customer_name', 'grand_total', 'payment_status']]
-            display_df.columns = ['ID', 'Receipt #', 'Date', 'Customer', 'Total', 'Status']
+            display_df = df[['id', 'receipt_number', 'date', 'customer_name', 'grand_total', 'payment_method']]
+            display_df.columns = ['ID', 'Receipt #', 'Date', 'Customer', 'Total', 'Payment']
             
             st.dataframe(
                 display_df,
@@ -1257,7 +1287,6 @@ def view_receipt_history():
                 }
             )
             
-            # Select receipt to view
             selected_id = st.selectbox(
                 "Select Receipt to View",
                 options=[r['id'] for r in filtered_receipts],
@@ -1267,7 +1296,6 @@ def view_receipt_history():
             if selected_id:
                 selected_receipt = next(r for r in filtered_receipts if r['id'] == selected_id)
                 
-                # Action buttons
                 col_actions1, col_actions2, col_actions3 = st.columns(3)
                 with col_actions1:
                     if st.button("👁️ View Receipt", use_container_width=True, key="view_receipt"):
@@ -1290,7 +1318,6 @@ def view_receipt_history():
                             save_data()
                             st.rerun()
                 
-                # Show full receipt preview
                 if st.session_state.editing_receipt_id == selected_id:
                     st.markdown("---")
                     st.markdown("#### 📄 Receipt Details")
@@ -1320,7 +1347,6 @@ def main():
     init_session_state()
     st.markdown(get_custom_css(), unsafe_allow_html=True)
     
-    # Header
     st.markdown(f"""
     <div class="main-header">
         <h1>🧾 {CONFIG['app_name']}</h1>
@@ -1328,7 +1354,6 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar
     with st.sidebar:
         st.markdown("### ⚙️ Settings")
         
@@ -1357,7 +1382,6 @@ def main():
         st.metric("👥 Total Customers", total_customers)
         st.metric("💰 Total Revenue", f"{CONFIG['currency_symbol']} {total_revenue:,.2f}")
     
-    # Page routing
     if page == "New Receipt":
         create_new_receipt()
     elif page == "Product Management":
