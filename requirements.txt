@@ -1,5 +1,6 @@
-streamlit
-pandas
-reportlab
-barcode
-Pillow
+streamlit==1.28.1
+pandas==2.0.3
+reportlab==4.0.4
+python-barcode==0.13.1
+Pillow==10.0.1
+setuptools==68.0.0
