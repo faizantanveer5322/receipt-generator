@@ -774,23 +774,33 @@ def create_new_receipt():
     # Products - Use columns for better layout
     st.markdown("#### 🛒 Products")
     
+    # Initialize selected_product variable
+    selected_product = None
+    
     col_p1, col_p2, col_p3, col_p4 = st.columns([2.5, 1.2, 1, 1.2])
     with col_p1:
         if st.session_state.products_db:
             product_options = ["Select product..."] + [p['name'] for p in st.session_state.products_db]
             selected_product = st.selectbox("Select from saved products", product_options, key="product_select")
+        else:
+            st.info("No products available. Add products in Product Management.")
+            selected_product = None
+    
     with col_p2:
         qty = st.number_input("Quantity", min_value=1, value=1, key="product_qty")
+    
     with col_p3:
-        if selected_product and selected_product != "Select product...":
+        # Only show price if a product is selected
+        if selected_product and selected_product != "Select product..." and st.session_state.products_db:
             product = next((p for p in st.session_state.products_db if p['name'] == selected_product), None)
             if product:
                 st.write(f"Price: **{CONFIG['currency_symbol']} {product['price']:.2f}**")
+    
     with col_p4:
         st.write("")
         st.write("")
         if st.button("➕ Add to Cart", use_container_width=True, key="add_to_cart_btn"):
-            if selected_product and selected_product != "Select product...":
+            if selected_product and selected_product != "Select product..." and st.session_state.products_db:
                 product = next((p for p in st.session_state.products_db if p['name'] == selected_product), None)
                 if product:
                     st.session_state.product_items.append({
@@ -801,6 +811,8 @@ def create_new_receipt():
                     })
                     st.success(f"✅ Added {product['name']} to cart!")
                     st.rerun()
+            else:
+                st.warning("Please select a product first")
     
     # Custom product
     with st.expander("➕ Add Custom Product"):
